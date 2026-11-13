@@ -3,5 +3,5 @@
 // "Publishable key", starts with sb_publishable_). Never put a secret or service_role key here.
 window.HSA_CONFIG = {
   supabaseUrl: "https://bxnhxgejsfxxupxwysep.supabase.co",
-  publishableKey: "PASTE_PUBLISHABLE_KEY_HERE",
+  publishableKey: "sb_publishable_qtGzVEmCldu_ZXqaC1-UAg_BOhcI-Jg",
 };
