@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to Home Services Library</title>
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#5b6475; --accent:#1f6feb; --danger:#b42318; --border:#d9dee7; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --card:#171b23; --text:#e6e9ef; --muted:#9aa3b2; --accent:#4c8dff; --danger:#ff6b5e; --border:#2a3140; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:420px; margin:8vh auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; }
+  h1 { font-size:1.25rem; margin:0 0 12px; }
+  p, dd { color:var(--muted); line-height:1.5; }
+  label { display:block; font-size:.9rem; margin:12px 0 4px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:transparent; color:var(--text); font-size:1rem; }
+  button { margin-top:16px; padding:10px 16px; border-radius:8px; border:1px solid var(--accent); font-size:1rem; cursor:pointer; }
+  .primary { background:var(--accent); color:#fff; } .secondary { background:transparent; color:var(--text); border-color:var(--border); }
+  .row { display:flex; gap:8px; } .row button { flex:1; }
+  .error { color:var(--danger); } .hidden { display:none; }
+  dl { margin:12px 0; } dt { font-weight:600; margin-top:8px; } dd { margin:2px 0 0; word-break:break-all; }
+</style>
+</head>
+<body>
+<main><div class="card">
+  <h1>Home Services Library</h1>
+  <p id="status">Loading…</p>
+
+  <form id="login" class="hidden">
+    <p>Sign in to let Claude use your library.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+
+  <section id="consent" class="hidden">
+    <p>An app is asking to use your Home Services Library:</p>
+    <dl>
+      <dt>App</dt><dd id="client"></dd>
+      <dt>Will return to</dt><dd id="redirect"></dd>
+      <dt>Access</dt><dd id="scopes"></dd>
+    </dl>
+    <p>Only approve if you just clicked "Connect" in Claude.</p>
+    <div class="row">
+      <button class="secondary" id="deny" type="button">Deny</button>
+      <button class="primary" id="approve" type="button">Approve</button>
+    </div>
+  </section>
+  <p id="error" class="error hidden"></p>
+</div></main>
+
+<script src="config.js"></script>
+<!-- supabase-js 2.118.0 (Oct 2026), pinned with Subresource Integrity -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
+        integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => $(id).classList.remove("hidden");
+  const hide = (id) => $(id).classList.add("hidden");
+  const fail = (msg) => { hide("login"); hide("consent"); $("status").textContent = ""; $("error").textContent = msg; show("error"); };
+
+  const cfg = window.HSA_CONFIG || {};
+  if (!cfg.publishableKey || cfg.publishableKey.startsWith("PASTE_")) return fail("This page is not configured yet (publishable key missing in config.js).");
+  const authorizationId = new URLSearchParams(location.search).get("authorization_id");
+  if (!authorizationId) return fail("No sign-in request found. Start from Claude's \"Connect\" button.");
+
+  const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.publishableKey);
+
+  async function consentStep() {
+    hide("login"); $("status").textContent = "Checking the request…";
+    const { data, error } = await sb.auth.oauth.getAuthorizationDetails(authorizationId);
+    if (error) return fail("Could not load the request: " + error.message);
+    if (!data.authorization_id && data.redirect_url) { location.assign(data.redirect_url); return; } // already approved
+    $("client").textContent = (data.client && (data.client.name || data.client.client_name)) || "Unknown app";
+    $("redirect").textContent = data.redirect_uri || (data.client && data.client.redirect_uri) || "";
+    $("scopes").textContent = (data.scope || data.scopes || "basic access").toString();
+    $("status").textContent = "";
+    show("consent");
+  }
+
+  async function decide(approve) {
+    $("approve").disabled = $("deny").disabled = true;
+    const fn = approve ? sb.auth.oauth.approveAuthorization : sb.auth.oauth.denyAuthorization;
+    const { data, error } = await fn.call(sb.auth.oauth, authorizationId);
+    if (error) return fail("Could not complete: " + error.message);
+    location.assign(data.redirect_url);
+  }
+  $("approve").onclick = () => decide(true);
+  $("deny").onclick = () => decide(false);
+
+  $("login").onsubmit = async (e) => {
+    e.preventDefault(); hide("error");
+    const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+    if (error) { $("error").textContent = "Sign-in failed: " + error.message; show("error"); return; }
+    consentStep();
+  };
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) return consentStep();
+  $("status").textContent = ""; show("login");
+})();
+</script>
+</body>
+</html>
